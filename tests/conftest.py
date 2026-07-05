@@ -122,5 +122,5 @@ _install_inventree_stubs()
 @pytest.fixture
 def plugin_instance():
     """Fresh plugin instance with default settings (overridable per-test)."""
-    from inventree_brotherql.plugin import BrotherQLLabelPrintPlugin
-    return BrotherQLLabelPrintPlugin()
+    from inventree_brotherql.plugin import RemoteHTTPPrintServicePlugin
+    return RemoteHTTPPrintServicePlugin()

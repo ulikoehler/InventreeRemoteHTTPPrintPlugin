@@ -29,14 +29,14 @@ from rest_framework import serializers
 from plugin import InvenTreePlugin
 from plugin.mixins import LabelPrintingMixin, SettingsMixin
 
-from . import BROTHERQL_PLUGIN_VERSION
+from . import PLUGIN_VERSION
 from .client import BrotherQLClient, BrotherQLError, png_bytes_from_pil
 
 logger = logging.getLogger("inventree.brotherql")
 
 
-class BrotherQLLabelPrintPlugin(LabelPrintingMixin, SettingsMixin, InvenTreePlugin):
-    """Print InvenTree labels via a BrotherQL Label Print Service instance.
+class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreePlugin):
+    """Print InvenTree labels via a remote HTTP print service instance.
 
     Workflow per printed item:
 
@@ -57,7 +57,7 @@ class BrotherQLLabelPrintPlugin(LabelPrintingMixin, SettingsMixin, InvenTreePlug
     # ------------------------------------------------------------------ #
     # Plugin metadata (InvenTreePlugin)
     # ------------------------------------------------------------------ #
-    NAME = "BrotherQLLabelPrintPlugin"
+    NAME = "RemoteHTTPPrintServicePlugin"
     SLUG = "brotherql"
     TITLE = _("Remote HTTP print service")
     DESCRIPTION = _(
@@ -67,7 +67,7 @@ class BrotherQLLabelPrintPlugin(LabelPrintingMixin, SettingsMixin, InvenTreePlug
         "plugin settings."
     )
     AUTHOR = "InvenTree community"
-    VERSION = BROTHERQL_PLUGIN_VERSION
+    VERSION = PLUGIN_VERSION
     WEBSITE = "https://github.com/ulikoehler/BrotherQLLabelPrintService"
     LICENSE = "MIT"
     PUBLISH_DATE = "2025-07-05"

@@ -18,8 +18,8 @@ import pytest
 from PIL import Image
 
 from inventree_brotherql.client import BrotherQLError
-from inventree_brotherql.plugin import BrotherQLLabelPrintPlugin
-from inventree_brotherql import BROTHERQL_PLUGIN_VERSION
+from inventree_brotherql.plugin import RemoteHTTPPrintServicePlugin
+from inventree_brotherql import PLUGIN_VERSION
 
 
 # ---------------------------------------------------------------------------
@@ -28,8 +28,8 @@ from inventree_brotherql import BROTHERQL_PLUGIN_VERSION
 class TestPluginMetadata:
     def test_basic_metadata(self, plugin_instance):
         assert plugin_instance.SLUG == "brotherql"
-        assert plugin_instance.NAME == "BrotherQLLabelPrintPlugin"
-        assert plugin_instance.VERSION == BROTHERQL_PLUGIN_VERSION
+        assert plugin_instance.NAME == "RemoteHTTPPrintServicePlugin"
+        assert plugin_instance.VERSION == PLUGIN_VERSION
         assert plugin_instance.MIN_VERSION == "0.16.0"
         assert plugin_instance.BLOCKING_PRINT is True
 
