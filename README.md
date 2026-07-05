@@ -26,12 +26,42 @@ on the InvenTree host.
 
 ## Installation
 
+### From the command line
+
 ```bash
 # From your InvenTree venv:
-pip install git+https://github.com/your-org/inventree-brotherql-plugin.git
+pip install git+https://github.com/ulikoehler/InventreeBrotherQLLabelPrintServicePlugin.git
 # (or, for local development:)
-pip install --editable /path/to/inventree-brotherql-plugin
+pip install --editable /path/to/InventreeBrotherQLLabelPrintServicePlugin
 ```
+
+### From the InvenTree web UI
+
+Go to **Admin UI → Settings → Plugin Settings → Install Plugin** and enter:
+
+- **Package Name**: *(empty)*
+- **Source URL**: `git+https://github.com/ulikoehler/InventreeBrotherQLLabelPrintServicePlugin.git`
+
+> **Important:** The Source URL **must** start with `git+https://`. Without the
+> `git+` prefix, InvenTree treats the URL as a custom PyPI index (pip's `-i`
+> flag) instead of a VCS install source, and pip fails with
+> *"You must give at least one requirement to install"*.
+
+> **Leave Package Name empty** when using a `git+https://` Source URL. If you
+> fill in a Package Name, pip checks that it matches the `name` field in the
+> package's `pyproject.toml` (here: `inventree-brotherql-plugin`). Entering the
+> GitHub repository name instead will fail with *"inconsistent name"* /
+> *"No matching distribution found"*.
+
+Alternatively, you can specify both fields — but the Package Name **must**
+match the `name` in `pyproject.toml` exactly:
+
+- **Package Name**: `inventree-brotherql-plugin`
+- **Source URL**: `git+https://github.com/ulikoehler/InventreeBrotherQLLabelPrintServicePlugin.git`
+
+![Correct InvenTree plugin install configuration](docs/InvenTree-Correct.png)
+
+### Enabling the plugin
 
 Then restart InvenTree and enable the plugin:
 
