@@ -62,7 +62,7 @@ Go to **Admin UI → Settings → Plugin Settings → Install Plugin** and enter
 Then restart InvenTree and enable the plugin:
 
 - **Admin UI → Settings → Plugin Settings → Remote HTTP print service → enabled**
-- Or set `inventree_brotherql.enabled = True` in your `config.yaml` and run
+- Or set `remote-http-print.enabled = True` in your `config.yaml` and run
   `invoke update` (or restart the worker).
 
 ## Configuration

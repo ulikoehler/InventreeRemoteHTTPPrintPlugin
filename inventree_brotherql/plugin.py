@@ -58,7 +58,7 @@ class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreeP
     # Plugin metadata (InvenTreePlugin)
     # ------------------------------------------------------------------ #
     NAME = "RemoteHTTPPrintServicePlugin"
-    SLUG = "brotherql"
+    SLUG = "remote-http-print"
     TITLE = _("Remote HTTP print service")
     DESCRIPTION = _(
         "Remote HTTP print service — prints InvenTree labels to a remote "

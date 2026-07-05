@@ -27,7 +27,7 @@ from inventree_brotherql import PLUGIN_VERSION
 # ---------------------------------------------------------------------------
 class TestPluginMetadata:
     def test_basic_metadata(self, plugin_instance):
-        assert plugin_instance.SLUG == "brotherql"
+        assert plugin_instance.SLUG == "remote-http-print"
         assert plugin_instance.NAME == "RemoteHTTPPrintServicePlugin"
         assert plugin_instance.VERSION == PLUGIN_VERSION
         assert plugin_instance.MIN_VERSION == "0.16.0"
