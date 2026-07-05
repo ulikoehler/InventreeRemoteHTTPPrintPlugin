@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`inventree_brotherql.plugin`.
+"""Unit tests for :mod:`inventree_remote_http_print.plugin`.
 
 These verify:
   * the plugin's METADATA / SETTINGS shape,
@@ -18,9 +18,9 @@ from unittest import mock
 import pytest
 from PIL import Image
 
-from inventree_brotherql.client import BrotherQLError
-from inventree_brotherql.plugin import RemoteHTTPPrintServicePlugin
-from inventree_brotherql import PLUGIN_VERSION
+from inventree_remote_http_print.client import BrotherQLError
+from inventree_remote_http_print.plugin import RemoteHTTPPrintServicePlugin
+from inventree_remote_http_print import PLUGIN_VERSION
 
 
 def _set_endpoints(plugin, endpoints):
@@ -256,7 +256,7 @@ class TestBeforePrinting:
         plugin_instance.set_setting_for_test("THRESHOLD", 80)
         plugin_instance.set_setting_for_test("HQ", False)
 
-        with mock.patch("inventree_brotherql.plugin.BrotherQLClient") as ClientCls:
+        with mock.patch("inventree_remote_http_print.plugin.BrotherQLClient") as ClientCls:
             mock_client = ClientCls.return_value
             plugin_instance.before_printing()
             mock_client.update_settings.assert_called_once()
@@ -270,7 +270,7 @@ class TestBeforePrinting:
             {"name": "Office", "url": "http://printer.local:8080"},
         ])
         plugin_instance.set_setting_for_test("SYNC_SERVER_SETTINGS", True)
-        with mock.patch("inventree_brotherql.plugin.BrotherQLClient") as ClientCls:
+        with mock.patch("inventree_remote_http_print.plugin.BrotherQLClient") as ClientCls:
             mock_client = ClientCls.return_value
             mock_client.update_settings.side_effect = BrotherQLError("server down")
             # Should not raise.
@@ -297,7 +297,7 @@ class TestPrintLabelWorkflow:
         }
 
     def _patch_client(self, plugin_instance, **method_returns):
-        patcher = mock.patch("inventree_brotherql.plugin.BrotherQLClient")
+        patcher = mock.patch("inventree_remote_http_print.plugin.BrotherQLClient")
         ClientCls = patcher.start()
         client = ClientCls.return_value
         client.upload_png.return_value = method_returns.get("file_id", "f1")
@@ -482,7 +482,7 @@ class TestPrintLabelWorkflow:
         png_kwargs["printing_options"] = {"endpoint": "Warehouse"}
         plugin_instance.set_setting_for_test("POLL_STATUS", False)
 
-        with mock.patch("inventree_brotherql.plugin.BrotherQLClient") as ClientCls:
+        with mock.patch("inventree_remote_http_print.plugin.BrotherQLClient") as ClientCls:
             client = ClientCls.return_value
             client.upload_png.return_value = "f1"
             client.print.return_value = {"id": "p1", "status": "queued"}

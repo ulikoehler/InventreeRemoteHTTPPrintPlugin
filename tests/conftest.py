@@ -122,5 +122,5 @@ _install_inventree_stubs()
 @pytest.fixture
 def plugin_instance():
     """Fresh plugin instance with default settings (overridable per-test)."""
-    from inventree_brotherql.plugin import RemoteHTTPPrintServicePlugin
+    from inventree_remote_http_print.plugin import RemoteHTTPPrintServicePlugin
     return RemoteHTTPPrintServicePlugin()

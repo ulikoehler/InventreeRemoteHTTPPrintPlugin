@@ -36,11 +36,11 @@ test = [
 ]
 
 [project.entry-points."inventree_plugins"]
-RemoteHTTPPrintServicePlugin = "inventree_brotherql.plugin:RemoteHTTPPrintServicePlugin"
+RemoteHTTPPrintServicePlugin = "inventree_remote_http_print.plugin:RemoteHTTPPrintServicePlugin"
 
 [tool.setuptools.packages.find]
-include = ["inventree_brotherql*"]
+include = ["inventree_remote_http_print*"]
 exclude = ["tests*"]
 
 [tool.setuptools.package-data]
-inventree_brotherql = ["static/plugins/remote-http-print/*.js"]
+inventree_remote_http_print = ["static/plugins/remote-http-print/*.js"]

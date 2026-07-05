@@ -1,4 +1,4 @@
-"""Unit tests for :mod:`inventree_brotherql.client`.
+"""Unit tests for :mod:`inventree_remote_http_print.client`.
 
 These cover the HTTP workflow (upload -> print -> poll) against a mocked
 BrotherQL service using the `responses` library.
@@ -11,7 +11,7 @@ import pytest
 import responses
 from PIL import Image
 
-from inventree_brotherql.client import BrotherQLClient, BrotherQLError
+from inventree_remote_http_print.client import BrotherQLClient, BrotherQLError
 
 
 BASE_URL = "http://brotherql.test:8080"
@@ -456,7 +456,7 @@ class TestPrintPng:
 
     def test_module_level_png_bytes_from_pil_flattens_alpha(self):
         # Direct unit test for the module-level helper.
-        from inventree_brotherql.client import png_bytes_from_pil
+        from inventree_remote_http_print.client import png_bytes_from_pil
         img = Image.new("RGBA", (10, 10), (255, 0, 0, 0))
         b = png_bytes_from_pil(img)
         decoded = Image.open(io.BytesIO(b))
