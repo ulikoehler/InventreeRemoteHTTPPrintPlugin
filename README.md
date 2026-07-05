@@ -71,7 +71,8 @@ All settings live under **Admin UI → Settings → Plugin Settings → Remote H
 
 | Setting | Default | Description |
 |---|---|---|
-| `SERVER_URL` | *(empty, required)* | Base URL of the BrotherQL service, e.g. `http://10.0.0.42:8080` |
+| `ENDPOINTS` | `[]` *(required)* | JSON list of print endpoints. Each entry is `{"name": "...", "url": "..."}`, e.g. `[{"name": "Office", "url": "http://10.0.0.42:8080"}, {"name": "Warehouse", "url": "http://10.0.0.99:8080"}]` |
+| `DEFAULT_ENDPOINT` | *(empty)* | Name of the endpoint to use when none is selected in the print dialog. Leave blank to use the first endpoint. |
 | `REQUEST_TIMEOUT` | `30` | Per-HTTP-request timeout in seconds |
 | `VERIFY_SSL` | `True` | Disable only for trusted internal services with self-signed certs |
 | `DEFAULT_LABEL` | *(empty)* | `brother_ql` label identifier used when the print dialog doesn't override it. Examples: `62` (endless 62mm tape), `62x29` (die-cut), `d24` (round 24mm) |
@@ -97,6 +98,7 @@ All settings live under **Admin UI → Settings → Plugin Settings → Remote H
 When you select **Remote HTTP print service** in the InvenTree print
 dialog, the following extra fields appear:
 
+- **Endpoint** — select which print endpoint to use (leave blank for the default endpoint)
 - **Copies** — overrides `DEFAULT_COPIES`
 - **Label type** — overrides `DEFAULT_LABEL` (e.g. `62`, `62x29`, `d24`)
 - **Orientation** — `Auto` (recommended), `Portrait`, or `Landscape`

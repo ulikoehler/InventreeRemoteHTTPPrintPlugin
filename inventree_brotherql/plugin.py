@@ -19,6 +19,7 @@ once per print batch, in :meth:`before_printing`.
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import Any, Dict, Optional
 
@@ -87,15 +88,26 @@ class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreeP
     # PUT /api/settings. We expose them here so InvenTree admins can manage
     # the print service without logging into the BrotherQL host.
     SETTINGS: Dict[str, Dict[str, Any]] = {
-        "SERVER_URL": {
-            "name": _("BrotherQL service URL"),
+        "ENDPOINTS": {
+            "name": _("Print endpoints"),
             "description": _(
-                "Base URL of the running BrotherQL Label Print Service, "
-                "e.g. http://10.0.0.42:8080"
+                "JSON list of endpoints. Each entry is an object with "
+                "'name' and 'url' keys, e.g. "
+                "[{\"name\": \"Office\", \"url\": \"http://10.0.0.42:8080\"}, "
+                "{\"name\": \"Warehouse\", \"url\": \"http://10.0.0.99:8080\"}]."
             ),
-            "default": "",
+            "default": "[]",
             "required": True,
             "validator": str,
+        },
+        "DEFAULT_ENDPOINT": {
+            "name": _("Default endpoint"),
+            "description": _(
+                "Name of the endpoint to use when none is selected in the "
+                "print dialog. Must match a 'name' in the endpoints list. "
+                "Leave blank to use the first endpoint."
+            ),
+            "default": "",
         },
         "REQUEST_TIMEOUT": {
             "name": _("HTTP timeout (s)"),
@@ -207,6 +219,17 @@ class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreeP
         anything the user leaves blank.
         """
 
+        endpoint = serializers.CharField(
+            required=False,
+            allow_blank=True,
+            allow_null=True,
+            default=None,
+            label=_("Endpoint"),
+            help_text=_(
+                "Select which print endpoint to use. Leave blank to use "
+                "the default endpoint configured in plugin settings."
+            ),
+        )
         copies = serializers.IntegerField(
             required=False,
             min_value=1,
@@ -260,14 +283,74 @@ class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreeP
         )
 
     # ------------------------------------------------------------------ #
+    # Endpoint helpers
+    # ------------------------------------------------------------------ #
+    def _parse_endpoints(self) -> list[dict[str, str]]:
+        """Parse the ENDPOINTS setting into a list of {name, url} dicts."""
+        raw = self.get_setting("ENDPOINTS") or "[]"
+        try:
+            endpoints = json.loads(raw)
+        except (json.JSONDecodeError, TypeError):
+            return []
+        if not isinstance(endpoints, list):
+            return []
+        result = []
+        for ep in endpoints:
+            if isinstance(ep, dict) and "name" in ep and "url" in ep:
+                result.append({"name": str(ep["name"]), "url": str(ep["url"]).strip()})
+        return result
+
+    def _resolve_endpoint(self, override: Optional[str]) -> dict[str, str]:
+        """Resolve which endpoint to use.
+
+        Priority: dialog override > DEFAULT_ENDPOINT setting > first endpoint.
+        Returns the endpoint dict with 'name' and 'url' keys.
+        Raises ValidationError if no endpoints are configured.
+        """
+        endpoints = self._parse_endpoints()
+        if not endpoints:
+            raise ValidationError(
+                _("No print endpoints configured. Add at least one endpoint "
+                  "in Plugin Settings (ENDPOINTS).")
+            )
+
+        # Try dialog override
+        if override:
+            name = str(override).strip()
+            for ep in endpoints:
+                if ep["name"] == name:
+                    return ep
+            raise ValidationError(
+                _("Endpoint '%(name)s' not found. Available: %(available)s") % {
+                    "name": name,
+                    "available": ", ".join(ep["name"] for ep in endpoints),
+                }
+            )
+
+        # Try DEFAULT_ENDPOINT setting
+        default_name = (self.get_setting("DEFAULT_ENDPOINT") or "").strip()
+        if default_name:
+            for ep in endpoints:
+                if ep["name"] == default_name:
+                    return ep
+
+        # Fall back to first endpoint
+        return endpoints[0]
+
+    # ------------------------------------------------------------------ #
     # Client construction
     # ------------------------------------------------------------------ #
-    def _get_client(self) -> BrotherQLClient:
-        """Build a :class:`BrotherQLClient` from current plugin settings."""
-        base_url = (self.get_setting("SERVER_URL") or "").strip()
+    def _get_client(self, endpoint: Optional[dict[str, str]] = None) -> BrotherQLClient:
+        """Build a :class:`BrotherQLClient` for the given endpoint.
+
+        If no endpoint is provided, resolves the default endpoint.
+        """
+        if endpoint is None:
+            endpoint = self._resolve_endpoint(None)
+        base_url = endpoint["url"]
         if not base_url:
             raise ValidationError(
-                _("BrotherQL service URL is not configured. Set it in Plugin Settings.")
+                _("Endpoint '%(name)s' has no URL configured.") % {"name": endpoint.get("name", "?")}
             )
         try:
             timeout = float(self.get_setting("REQUEST_TIMEOUT"))
@@ -287,18 +370,19 @@ class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreeP
         """Called once per print batch before any label is rendered.
 
         Used to push the server-side print settings (cut, dither, threshold,
-        hq) to the BrotherQL service so the rest of the batch can submit
+        hq) to the print service so the rest of the batch can submit
         plain ``POST /api/print`` requests without re-sending them.
         """
         if not bool(self.get_setting("SYNC_SERVER_SETTINGS")):
             return
         try:
-            client = self._get_client()
+            endpoint = self._resolve_endpoint(None)
+            client = self._get_client(endpoint)
         except ValidationError:
-            # SERVER_URL not configured yet – let print_label surface the
+            # No endpoints configured yet – let print_label surface the
             # error to the user; we don't want to crash before_printing and
             # mask the real cause.
-            logger.warning("BrotherQL: SERVER_URL not set, skipping server-settings sync")
+            logger.warning("No endpoint configured, skipping server-settings sync")
             return
         try:
             settings_payload = {
@@ -310,13 +394,13 @@ class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreeP
                 },
             }
             client.update_settings(settings_payload)
-            logger.info("BrotherQL: synced print settings to server")
+            logger.info("Synced print settings to endpoint '%s'", endpoint["name"])
         except BrotherQLError as exc:
             # Don't fail the whole batch just because settings sync failed –
             # the printer might still work with whatever config it has.
-            logger.warning("BrotherQL: could not sync settings to server: %s", exc)
+            logger.warning("Could not sync settings to endpoint '%s': %s", endpoint["name"], exc)
         except Exception as exc:  # pragma: no cover - defensive
-            logger.warning("BrotherQL: unexpected error syncing settings: %s", exc)
+            logger.warning("Unexpected error syncing settings to endpoint '%s': %s", endpoint["name"], exc)
 
     # ------------------------------------------------------------------ #
     # The one required method
@@ -343,6 +427,9 @@ class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreeP
 
         opts: Dict[str, Any] = kwargs.get("printing_options") or {}
 
+        # Resolve endpoint (dialog override > DEFAULT_ENDPOINT > first).
+        endpoint = self._resolve_endpoint(opts.get("endpoint"))
+
         # Resolve each option with fallback to plugin settings.
         copies = self._resolve_copies(opts.get("copies"))
         label = self._resolve_label(opts.get("label"))
@@ -355,12 +442,14 @@ class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreeP
             filename = f"{filename}.png"
 
         try:
-            client = self._get_client()
+            client = self._get_client(endpoint)
         except ValidationError:
             raise
         except Exception as exc:
             raise ValidationError(
-                _("Could not build BrotherQL client: %(err)s") % {"err": exc}
+                _("Could not build print client for endpoint '%(ep)s': %(err)s") % {
+                    "ep": endpoint["name"], "err": exc
+                }
             )
 
         # brother_ql expects the shorter edge to match the tape width. InvenTree
@@ -375,8 +464,9 @@ class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreeP
             )
 
         logger.info(
-            "BrotherQL: printing label '%s' (%dx%d px, %s orientation, %d cop%s)",
+            "Printing label '%s' via endpoint '%s' (%dx%d px, %s orientation, %d cop%s)",
             filename,
+            endpoint["name"],
             png_file.width,
             png_file.height,
             orientation or "auto",

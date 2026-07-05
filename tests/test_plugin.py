@@ -12,6 +12,7 @@ full InvenTree install.
 """
 
 import io
+import json
 from unittest import mock
 
 import pytest
@@ -20,6 +21,11 @@ from PIL import Image
 from inventree_brotherql.client import BrotherQLError
 from inventree_brotherql.plugin import RemoteHTTPPrintServicePlugin
 from inventree_brotherql import PLUGIN_VERSION
+
+
+def _set_endpoints(plugin, endpoints):
+    """Helper to set the ENDPOINTS setting from a list of dicts."""
+    plugin.set_setting_for_test("ENDPOINTS", json.dumps(endpoints))
 
 
 # ---------------------------------------------------------------------------
@@ -34,9 +40,9 @@ class TestPluginMetadata:
         assert plugin_instance.BLOCKING_PRINT is True
 
     def test_required_settings_present(self, plugin_instance):
-        # SERVER_URL is the one absolutely-required setting.
-        assert "SERVER_URL" in plugin_instance.SETTINGS
-        assert plugin_instance.SETTINGS["SERVER_URL"].get("required") is True
+        # ENDPOINTS is the one absolutely-required setting.
+        assert "ENDPOINTS" in plugin_instance.SETTINGS
+        assert plugin_instance.SETTINGS["ENDPOINTS"].get("required") is True
 
     def test_settings_have_names_and_descriptions(self, plugin_instance):
         for key, entry in plugin_instance.SETTINGS.items():
@@ -51,7 +57,7 @@ class TestPluginMetadata:
             name for name in dir(plugin_instance.PrintingOptionsSerializer)
             if not name.startswith("_") and name not in ("data", "initial_data", "errors", "is_valid")
         }
-        for expected in ("copies", "label", "orientation", "resize", "wait_for_completion"):
+        for expected in ("endpoint", "copies", "label", "orientation", "resize", "wait_for_completion"):
             assert expected in declared, f"missing printing option field: {expected}"
 
 
@@ -123,15 +129,72 @@ class TestOptionResolution:
 # ---------------------------------------------------------------------------
 # Client construction
 # ---------------------------------------------------------------------------
-class TestClientConstruction:
-    def test_missing_server_url_raises_validation_error(self, plugin_instance):
-        # SERVER_URL defaults to "" per SETTINGS.
+class TestEndpointResolution:
+    def test_no_endpoints_raises(self, plugin_instance):
         from django.core.exceptions import ValidationError
-        with pytest.raises(ValidationError, match="not configured"):
+        with pytest.raises(ValidationError, match="No print endpoints"):
+            plugin_instance._resolve_endpoint(None)
+
+    def test_first_endpoint_used_by_default(self, plugin_instance):
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer1.local:8080"},
+            {"name": "Warehouse", "url": "http://printer2.local:8080"},
+        ])
+        ep = plugin_instance._resolve_endpoint(None)
+        assert ep["name"] == "Office"
+        assert ep["url"] == "http://printer1.local:8080"
+
+    def test_default_endpoint_setting_used(self, plugin_instance):
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer1.local:8080"},
+            {"name": "Warehouse", "url": "http://printer2.local:8080"},
+        ])
+        plugin_instance.set_setting_for_test("DEFAULT_ENDPOINT", "Warehouse")
+        ep = plugin_instance._resolve_endpoint(None)
+        assert ep["name"] == "Warehouse"
+
+    def test_dialog_override_takes_priority(self, plugin_instance):
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer1.local:8080"},
+            {"name": "Warehouse", "url": "http://printer2.local:8080"},
+        ])
+        plugin_instance.set_setting_for_test("DEFAULT_ENDPOINT", "Office")
+        ep = plugin_instance._resolve_endpoint("Warehouse")
+        assert ep["name"] == "Warehouse"
+
+    def test_invalid_endpoint_name_raises(self, plugin_instance):
+        from django.core.exceptions import ValidationError
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer1.local:8080"},
+        ])
+        with pytest.raises(ValidationError, match="not found"):
+            plugin_instance._resolve_endpoint("Nonexistent")
+
+    def test_parse_endpoints_handles_invalid_json(self, plugin_instance):
+        plugin_instance.set_setting_for_test("ENDPOINTS", "not json")
+        assert plugin_instance._parse_endpoints() == []
+
+    def test_parse_endpoints_filters_missing_keys(self, plugin_instance):
+        _set_endpoints(plugin_instance, [
+            {"name": "OK", "url": "http://ok:8080"},
+            {"name": "NoUrl"},
+            {"url": "http://noname:8080"},
+        ])
+        eps = plugin_instance._parse_endpoints()
+        assert len(eps) == 1
+        assert eps[0]["name"] == "OK"
+
+
+class TestClientConstruction:
+    def test_no_endpoints_raises_validation_error(self, plugin_instance):
+        from django.core.exceptions import ValidationError
+        with pytest.raises(ValidationError, match="No print endpoints"):
             plugin_instance._get_client()
 
-    def test_client_built_from_settings(self, plugin_instance):
-        plugin_instance.set_setting_for_test("SERVER_URL", "http://printer.local:8080/")
+    def test_client_built_from_first_endpoint(self, plugin_instance):
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer.local:8080/"},
+        ])
         plugin_instance.set_setting_for_test("REQUEST_TIMEOUT", "15")
         plugin_instance.set_setting_for_test("VERIFY_SSL", False)
         client = plugin_instance._get_client()
@@ -139,8 +202,19 @@ class TestClientConstruction:
         assert client.timeout == 15.0
         assert client.verify_ssl is False
 
+    def test_client_built_from_named_endpoint(self, plugin_instance):
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer1.local:8080"},
+            {"name": "Warehouse", "url": "http://printer2.local:8080"},
+        ])
+        ep = plugin_instance._resolve_endpoint("Warehouse")
+        client = plugin_instance._get_client(ep)
+        assert client.base_url == "http://printer2.local:8080"
+
     def test_invalid_timeout_falls_back_to_default(self, plugin_instance):
-        plugin_instance.set_setting_for_test("SERVER_URL", "http://printer.local:8080")
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer.local:8080"},
+        ])
         plugin_instance.set_setting_for_test("REQUEST_TIMEOUT", "garbage")
         client = plugin_instance._get_client()
         assert client.timeout == 30.0
@@ -156,8 +230,8 @@ class TestBeforePrinting:
             plugin_instance.before_printing()
             m.assert_not_called()
 
-    def test_no_crash_when_server_url_missing(self, plugin_instance):
-        # SERVER_URL not set -> _get_client raises ValidationError.
+    def test_no_crash_when_no_endpoints(self, plugin_instance):
+        # No endpoints configured -> _resolve_endpoint raises ValidationError.
         # before_printing should swallow this and continue (so print_label
         # surfaces the real error later).
         plugin_instance.set_setting_for_test("SYNC_SERVER_SETTINGS", True)
@@ -165,7 +239,9 @@ class TestBeforePrinting:
         plugin_instance.before_printing()
 
     def test_sync_pushes_settings_to_server(self, plugin_instance):
-        plugin_instance.set_setting_for_test("SERVER_URL", "http://printer.local:8080")
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer.local:8080"},
+        ])
         plugin_instance.set_setting_for_test("SYNC_SERVER_SETTINGS", True)
         plugin_instance.set_setting_for_test("AUTO_CUT", False)
         plugin_instance.set_setting_for_test("DITHER", True)
@@ -182,7 +258,9 @@ class TestBeforePrinting:
             }
 
     def test_sync_error_does_not_crash(self, plugin_instance):
-        plugin_instance.set_setting_for_test("SERVER_URL", "http://printer.local:8080")
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer.local:8080"},
+        ])
         plugin_instance.set_setting_for_test("SYNC_SERVER_SETTINGS", True)
         with mock.patch("inventree_brotherql.plugin.BrotherQLClient") as ClientCls:
             mock_client = ClientCls.return_value
@@ -230,13 +308,15 @@ class TestPrintLabelWorkflow:
         with pytest.raises(ValidationError, match="not rasterised"):
             plugin_instance.print_label(**kwargs)
 
-    def test_missing_server_url_raises(self, plugin_instance, png_kwargs):
+    def test_missing_endpoints_raises(self, plugin_instance, png_kwargs):
         from django.core.exceptions import ValidationError
-        with pytest.raises(ValidationError, match="not configured"):
+        with pytest.raises(ValidationError, match="No print endpoints"):
             plugin_instance.print_label(**png_kwargs)
 
     def test_happy_path_with_polling(self, plugin_instance, png_kwargs):
-        plugin_instance.set_setting_for_test("SERVER_URL", "http://printer.local:8080")
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer.local:8080"},
+        ])
         plugin_instance.set_setting_for_test("POLL_STATUS", True)
         plugin_instance.set_setting_for_test("POLL_INTERVAL", 1)
         plugin_instance.set_setting_for_test("POLL_TIMEOUT", 30)
@@ -270,7 +350,9 @@ class TestPrintLabelWorkflow:
         assert client.wait_for_completion.call_args[1]["timeout"] == 30
 
     def test_fire_and_forget_no_polling(self, plugin_instance, png_kwargs):
-        plugin_instance.set_setting_for_test("SERVER_URL", "http://printer.local:8080")
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer.local:8080"},
+        ])
         plugin_instance.set_setting_for_test("POLL_STATUS", False)
 
         patcher, client = self._patch_client(plugin_instance)
@@ -284,7 +366,9 @@ class TestPrintLabelWorkflow:
         client.wait_for_completion.assert_not_called()
 
     def test_dialog_overrides_propagate(self, plugin_instance, png_kwargs):
-        plugin_instance.set_setting_for_test("SERVER_URL", "http://printer.local:8080")
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer.local:8080"},
+        ])
         png_kwargs["printing_options"] = {
             "copies": 4,
             "label": "62x29",
@@ -307,7 +391,9 @@ class TestPrintLabelWorkflow:
         client.wait_for_completion.assert_not_called()
 
     def test_forced_orientation_enables_resize_by_default(self, plugin_instance, png_kwargs):
-        plugin_instance.set_setting_for_test("SERVER_URL", "http://printer.local:8080")
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer.local:8080"},
+        ])
         png_kwargs["printing_options"] = {
             "copies": 1,
             "label": None,
@@ -324,7 +410,9 @@ class TestPrintLabelWorkflow:
 
     def test_upload_error_raises_validation_error(self, plugin_instance, png_kwargs):
         from django.core.exceptions import ValidationError
-        plugin_instance.set_setting_for_test("SERVER_URL", "http://printer.local:8080")
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer.local:8080"},
+        ])
         patcher, client = self._patch_client(plugin_instance)
         try:
             client.upload_png.side_effect = BrotherQLError("service unreachable")
@@ -335,7 +423,9 @@ class TestPrintLabelWorkflow:
 
     def test_print_failure_raises_validation_error(self, plugin_instance, png_kwargs):
         from django.core.exceptions import ValidationError
-        plugin_instance.set_setting_for_test("SERVER_URL", "http://printer.local:8080")
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer.local:8080"},
+        ])
         plugin_instance.set_setting_for_test("POLL_STATUS", True)
 
         patcher, client = self._patch_client(plugin_instance)
@@ -347,7 +437,9 @@ class TestPrintLabelWorkflow:
             patcher.stop()
 
     def test_poll_timeout_does_not_fail_print(self, plugin_instance, png_kwargs):
-        plugin_instance.set_setting_for_test("SERVER_URL", "http://printer.local:8080")
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer.local:8080"},
+        ])
         plugin_instance.set_setting_for_test("POLL_STATUS", True)
         plugin_instance.set_setting_for_test("POLL_TIMEOUT", 5)
 
@@ -362,7 +454,9 @@ class TestPrintLabelWorkflow:
             patcher.stop()
 
     def test_filename_gets_png_extension(self, plugin_instance, png_kwargs):
-        plugin_instance.set_setting_for_test("SERVER_URL", "http://printer.local:8080")
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer.local:8080"},
+        ])
         plugin_instance.set_setting_for_test("POLL_STATUS", False)
         png_kwargs["filename"] = "stockitem_123"  # no extension
         patcher, client = self._patch_client(plugin_instance)
@@ -371,3 +465,21 @@ class TestPrintLabelWorkflow:
         finally:
             patcher.stop()
         assert client.upload_png.call_args[1]["filename"] == "stockitem_123.png"
+
+    def test_endpoint_dialog_override(self, plugin_instance, png_kwargs):
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer1.local:8080"},
+            {"name": "Warehouse", "url": "http://printer2.local:8080"},
+        ])
+        png_kwargs["printing_options"] = {"endpoint": "Warehouse"}
+        plugin_instance.set_setting_for_test("POLL_STATUS", False)
+
+        with mock.patch("inventree_brotherql.plugin.BrotherQLClient") as ClientCls:
+            client = ClientCls.return_value
+            client.upload_png.return_value = "f1"
+            client.print.return_value = {"id": "p1", "status": "queued"}
+            client.TERMINAL_STATUSES = ("printed", "failed")
+            plugin_instance.print_label(**png_kwargs)
+
+        # BrotherQLClient should have been constructed with the Warehouse URL
+        assert ClientCls.call_args[1]["base_url"] == "http://printer2.local:8080"
