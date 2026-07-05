@@ -1,4 +1,4 @@
-# inventree-brotherql-service-plugin
+# Remote HTTP print service
 
 An [InvenTree](https://inventree.org) label-printing plugin that sends
 rendered labels to a running
@@ -39,7 +39,7 @@ pip install --editable /path/to/InventreeBrotherQLLabelPrintServicePlugin
 
 Go to **Admin UI → Settings → Plugin Settings → Install Plugin** and enter:
 
-- **Package Name**: `inventree-brotherql-service-plugin`
+- **Package Name**: `inventree-remote-http-print-service`
 - **Source URL**: `git+https://github.com/ulikoehler/InventreeBrotherQLLabelPrintServicePlugin.git`
 
 > **Important:** The Source URL **must** start with `git+https://`. Without the
@@ -48,7 +48,7 @@ Go to **Admin UI → Settings → Plugin Settings → Install Plugin** and enter
 > *"You must give at least one requirement to install"*.
 
 > **The Package Name must match the `name` field in the package's
-> `pyproject.toml` exactly** (here: `inventree-brotherql-service-plugin`). Do **not**
+> `pyproject.toml` exactly** (here: `inventree-remote-http-print-service`). Do **not**
 > use the GitHub repository name — pip will reject it with *"inconsistent
 > name"* / *"No matching distribution found"*. Do **not** leave Package Name
 > empty either — InvenTree needs it to look up the installed package, save it
@@ -61,13 +61,13 @@ Go to **Admin UI → Settings → Plugin Settings → Install Plugin** and enter
 
 Then restart InvenTree and enable the plugin:
 
-- **Admin UI → Settings → Plugin Settings → BrotherQL → enabled**
+- **Admin UI → Settings → Plugin Settings → Remote HTTP print service → enabled**
 - Or set `inventree_brotherql.enabled = True` in your `config.yaml` and run
   `invoke update` (or restart the worker).
 
 ## Configuration
 
-All settings live under **Admin UI → Settings → Plugin Settings → BrotherQL**.
+All settings live under **Admin UI → Settings → Plugin Settings → Remote HTTP print service**.
 
 | Setting | Default | Description |
 |---|---|---|
@@ -94,7 +94,7 @@ All settings live under **Admin UI → Settings → Plugin Settings → BrotherQ
 
 ## Per-print options
 
-When you select **BrotherQL Label Print Service** in the InvenTree print
+When you select **Remote HTTP print service** in the InvenTree print
 dialog, the following extra fields appear:
 
 - **Copies** — overrides `DEFAULT_COPIES`

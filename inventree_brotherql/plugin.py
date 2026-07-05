@@ -59,10 +59,10 @@ class BrotherQLLabelPrintPlugin(LabelPrintingMixin, SettingsMixin, InvenTreePlug
     # ------------------------------------------------------------------ #
     NAME = "BrotherQLLabelPrintPlugin"
     SLUG = "brotherql"
-    TITLE = _("BrotherQL Label Print Service")
+    TITLE = _("Remote HTTP print service")
     DESCRIPTION = _(
-        "Print InvenTree labels to a Brother QL printer through a remote "
-        "BrotherQL Label Print Service (https://github.com/ulikoehler/"
+        "Remote HTTP print service — prints InvenTree labels to a remote "
+        "print service over HTTP (https://github.com/ulikoehler/"
         "BrotherQLLabelPrintService). Configure the service base URL in the "
         "plugin settings."
     )
