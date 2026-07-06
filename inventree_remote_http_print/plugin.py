@@ -41,10 +41,12 @@ class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreeP
 
     Workflow per printed item:
 
-        1. InvenTree renders the label template to PDF, then to a 300 DPI PNG
-           (``png_file`` kwarg, a :class:`PIL.Image.Image`).
-        2. This plugin serialises the PNG to bytes and uploads it to the
-           BrotherQL service via ``POST /api/upload`` (multipart).
+        1. InvenTree renders the label template to PDF (``pdf_data`` kwarg)
+           and also to a 300 DPI PNG (``png_file`` kwarg).
+        2. This plugin uploads the PDF to the BrotherQL service via
+           ``POST /api/upload`` (multipart) so the server can use
+           ``pdfinfo`` for accurate mm dimension detection and autorotation.
+           If ``pdf_data`` is unavailable, it falls back to the PNG.
         3. The returned ``file_id`` is queued for printing via
            ``POST /api/print``.
         4. If polling is enabled, the plugin polls ``GET /api/queue`` until
@@ -430,8 +432,8 @@ class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreeP
         Receives the standard ``LabelPrintingMixin`` kwargs (see the InvenTree
         docs). We only need a handful:
 
-            pdf_data:         bytes            – raw PDF (unused, we use png_file)
-            png_file:         PIL.Image.Image  – rasterised label
+            pdf_data:         bytes            – raw PDF (preferred for upload)
+            png_file:         PIL.Image.Image  – rasterised label (fallback)
             filename:         str              – base filename
             width:            float            – mm (label_instance.width)
             height:           float            – mm (label_instance.height)
@@ -440,9 +442,17 @@ class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreeP
             user:             User | None
             printing_options: dict             – validated PrintingOptionsSerializer data
         """
+        pdf_data = kwargs.get("pdf_data")
         png_file = kwargs.get("png_file")
-        if png_file is None:
-            raise ValidationError(_("Label was not rasterised to a PNG; cannot print."))
+
+        if pdf_data:
+            use_pdf = True
+        elif png_file is not None:
+            use_pdf = False
+        else:
+            raise ValidationError(
+                _("No label data available (neither pdf_data nor png_file was provided).")
+            )
 
         opts: Dict[str, Any] = kwargs.get("printing_options") or {}
 
@@ -456,9 +466,13 @@ class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreeP
         resize = self._resolve_resize(opts.get("resize"), orientation)
         wait = self._resolve_wait(opts.get("wait_for_completion"))
 
-        filename = kwargs.get("filename") or "label.png"
-        if not filename.lower().endswith(".png"):
-            filename = f"{filename}.png"
+        filename = kwargs.get("filename") or "label"
+        if use_pdf:
+            if not filename.lower().endswith(".pdf"):
+                filename = f"{filename}.pdf"
+        else:
+            if not filename.lower().endswith(".png"):
+                filename = f"{filename}.png"
 
         try:
             client = self._get_client(endpoint)
@@ -471,30 +485,44 @@ class RemoteHTTPPrintServicePlugin(LabelPrintingMixin, SettingsMixin, InvenTreeP
                 }
             )
 
-        # brother_ql expects the shorter edge to match the tape width. InvenTree
-        # rasterises at LABEL_DPI=300 using the template's mm dimensions, so a
-        # 62mm-wide template produces a 696px-wide PNG that already matches a
-        # 62mm tape. The BrotherQL server will auto-detect this from the upload.
+        # Upload the PDF so the BrotherQL server can use pdfinfo for accurate
+        # mm dimension detection and autorotation. Fall back to the rasterised
+        # PNG if no PDF is available.
         try:
-            image_bytes = png_bytes_from_pil(png_file)
+            if use_pdf:
+                file_id = client.upload_file(
+                    pdf_data, filename=filename, content_type="application/pdf"
+                )
+            else:
+                image_bytes = png_bytes_from_pil(png_file)
+                file_id = client.upload_png(image_bytes, filename=filename)
         except Exception as exc:
             raise ValidationError(
-                _("Could not serialise label PNG: %(err)s") % {"err": exc}
+                _("Could not serialise label for upload: %(err)s") % {"err": exc}
             )
 
-        logger.info(
-            "Printing label '%s' via endpoint '%s' (%dx%d px, %s orientation, %d cop%s)",
-            filename,
-            endpoint["name"],
-            png_file.width,
-            png_file.height,
-            orientation or "auto",
-            copies,
-            "y" if copies == 1 else "ies",
-        )
+        if use_pdf:
+            logger.info(
+                "Printing label '%s' via endpoint '%s' (PDF, %s orientation, %d cop%s)",
+                filename,
+                endpoint["name"],
+                orientation or "auto",
+                copies,
+                "y" if copies == 1 else "ies",
+            )
+        else:
+            logger.info(
+                "Printing label '%s' via endpoint '%s' (%dx%d px, %s orientation, %d cop%s)",
+                filename,
+                endpoint["name"],
+                png_file.width,
+                png_file.height,
+                orientation or "auto",
+                copies,
+                "y" if copies == 1 else "ies",
+            )
 
         try:
-            file_id = client.upload_png(image_bytes, filename=filename)
             queue_item = client.print(
                 file_id,
                 label=label,

@@ -283,6 +283,7 @@ class TestBeforePrinting:
 class TestPrintLabelWorkflow:
     @pytest.fixture
     def png_kwargs(self):
+        """Kwargs with both pdf_data and png_file — plugin should prefer PDF."""
         img = Image.new("RGB", (696, 303), color="white")
         return {
             "png_file": img,
@@ -296,10 +297,27 @@ class TestPrintLabelWorkflow:
             "pdf_data": b"%PDF-1.4 ...",
         }
 
+    @pytest.fixture
+    def png_only_kwargs(self):
+        """Kwargs with only png_file (no pdf_data) — plugin should fall back to PNG."""
+        img = Image.new("RGB", (696, 303), color="white")
+        return {
+            "png_file": img,
+            "filename": "stockitem_123",
+            "width": 62.0,
+            "height": 27.0,
+            "label_instance": mock.Mock(name="label_template"),
+            "item_instance": mock.Mock(name="stock_item"),
+            "user": None,
+            "printing_options": {},
+            "pdf_data": None,
+        }
+
     def _patch_client(self, plugin_instance, **method_returns):
         patcher = mock.patch("inventree_remote_http_print.plugin.BrotherQLClient")
         ClientCls = patcher.start()
         client = ClientCls.return_value
+        client.upload_file.return_value = method_returns.get("file_id", "f1")
         client.upload_png.return_value = method_returns.get("file_id", "f1")
         client.print.return_value = method_returns.get(
             "queue_item", {"id": "p1", "status": "queued"}
@@ -310,10 +328,10 @@ class TestPrintLabelWorkflow:
         client.TERMINAL_STATUSES = ("printed", "failed")
         return patcher, client
 
-    def test_missing_png_raises(self, plugin_instance):
+    def test_missing_both_pdf_and_png_raises(self, plugin_instance):
         from django.core.exceptions import ValidationError
-        kwargs = {"png_file": None, "printing_options": {}}
-        with pytest.raises(ValidationError, match="not rasterised"):
+        kwargs = {"png_file": None, "pdf_data": None, "printing_options": {}}
+        with pytest.raises(ValidationError, match="No label data available"):
             plugin_instance.print_label(**kwargs)
 
     def test_missing_endpoints_raises(self, plugin_instance, png_kwargs):
@@ -335,11 +353,13 @@ class TestPrintLabelWorkflow:
         finally:
             patcher.stop()
 
-        # Upload happened.
-        client.upload_png.assert_called_once()
-        uploaded_bytes = client.upload_png.call_args[0][0]
-        assert uploaded_bytes[:8] == b"\x89PNG\r\n\x1a\n"
-        assert client.upload_png.call_args[1]["filename"].endswith(".png")
+        # PDF upload happened (preferred over PNG).
+        client.upload_file.assert_called_once()
+        uploaded_bytes = client.upload_file.call_args[0][0]
+        assert uploaded_bytes == b"%PDF-1.4 ..."
+        assert client.upload_file.call_args[1]["filename"].endswith(".pdf")
+        assert client.upload_file.call_args[1]["content_type"] == "application/pdf"
+        client.upload_png.assert_not_called()
 
         # Print happened with sensible defaults.
         client.print.assert_called_once()
@@ -369,7 +389,7 @@ class TestPrintLabelWorkflow:
         finally:
             patcher.stop()
 
-        client.upload_png.assert_called_once()
+        client.upload_file.assert_called_once()
         client.print.assert_called_once()
         client.wait_for_completion.assert_not_called()
 
@@ -423,8 +443,8 @@ class TestPrintLabelWorkflow:
         ])
         patcher, client = self._patch_client(plugin_instance)
         try:
-            client.upload_png.side_effect = BrotherQLError("service unreachable")
-            with pytest.raises(ValidationError, match="submission failed"):
+            client.upload_file.side_effect = BrotherQLError("service unreachable")
+            with pytest.raises(ValidationError, match="Could not serialise label"):
                 plugin_instance.print_label(**png_kwargs)
         finally:
             patcher.stop()
@@ -461,7 +481,7 @@ class TestPrintLabelWorkflow:
         finally:
             patcher.stop()
 
-    def test_filename_gets_png_extension(self, plugin_instance, png_kwargs):
+    def test_filename_gets_pdf_extension(self, plugin_instance, png_kwargs):
         _set_endpoints(plugin_instance, [
             {"name": "Office", "url": "http://printer.local:8080"},
         ])
@@ -472,7 +492,21 @@ class TestPrintLabelWorkflow:
             plugin_instance.print_label(**png_kwargs)
         finally:
             patcher.stop()
+        assert client.upload_file.call_args[1]["filename"] == "stockitem_123.pdf"
+
+    def test_filename_gets_png_extension_when_png_fallback(self, plugin_instance, png_only_kwargs):
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer.local:8080"},
+        ])
+        plugin_instance.set_setting_for_test("POLL_STATUS", False)
+        png_only_kwargs["filename"] = "stockitem_123"  # no extension
+        patcher, client = self._patch_client(plugin_instance)
+        try:
+            plugin_instance.print_label(**png_only_kwargs)
+        finally:
+            patcher.stop()
         assert client.upload_png.call_args[1]["filename"] == "stockitem_123.png"
+        client.upload_file.assert_not_called()
 
     def test_endpoint_dialog_override(self, plugin_instance, png_kwargs):
         _set_endpoints(plugin_instance, [
@@ -484,10 +518,30 @@ class TestPrintLabelWorkflow:
 
         with mock.patch("inventree_remote_http_print.plugin.BrotherQLClient") as ClientCls:
             client = ClientCls.return_value
-            client.upload_png.return_value = "f1"
+            client.upload_file.return_value = "f1"
             client.print.return_value = {"id": "p1", "status": "queued"}
             client.TERMINAL_STATUSES = ("printed", "failed")
             plugin_instance.print_label(**png_kwargs)
 
         # BrotherQLClient should have been constructed with the Warehouse URL
         assert ClientCls.call_args[1]["base_url"] == "http://printer2.local:8080"
+
+    def test_png_fallback_when_no_pdf(self, plugin_instance, png_only_kwargs):
+        """When pdf_data is None/empty, the plugin should fall back to PNG upload."""
+        _set_endpoints(plugin_instance, [
+            {"name": "Office", "url": "http://printer.local:8080"},
+        ])
+        plugin_instance.set_setting_for_test("POLL_STATUS", False)
+
+        patcher, client = self._patch_client(plugin_instance)
+        try:
+            plugin_instance.print_label(**png_only_kwargs)
+        finally:
+            patcher.stop()
+
+        client.upload_png.assert_called_once()
+        uploaded_bytes = client.upload_png.call_args[0][0]
+        assert uploaded_bytes[:8] == b"\x89PNG\r\n\x1a\n"
+        assert client.upload_png.call_args[1]["filename"].endswith(".png")
+        client.upload_file.assert_not_called()
+        client.print.assert_called_once()

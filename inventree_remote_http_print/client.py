@@ -127,21 +127,24 @@ class BrotherQLClient:
     # Public API
     # ------------------------------------------------------------------ #
 
-    def upload_png(self, image_bytes: bytes, *, filename: str = "label.png") -> str:
-        """Upload raw PNG ``bytes`` and return the server-assigned ``file_id``.
+    def upload_file(self, file_bytes: bytes, *, filename: str, content_type: str) -> str:
+        """Upload raw file ``bytes`` and return the server-assigned ``file_id``.
 
         Parameters
         ----------
-        image_bytes:
-            Raw PNG file content.
+        file_bytes:
+            Raw file content (PNG, PDF, SVG, etc.).
         filename:
-            Filename reported to the server (only the extension matters for
-            content-type detection; the server auto-detects dimensions via
-            Pillow, so a real ``.png`` is required).
+            Filename reported to the server — the extension determines how
+            the server detects dimensions (e.g. ``.pdf`` → ``pdfinfo``,
+            ``.png`` → Pillow with DPI metadata).
+        content_type:
+            MIME type for the multipart upload (e.g. ``"image/png"``,
+            ``"application/pdf"``).
         """
-        if not image_bytes:
-            raise BrotherQLError("image_bytes must not be empty")
-        files = {"file": (filename, image_bytes, "image/png")}
+        if not file_bytes:
+            raise BrotherQLError("file_bytes must not be empty")
+        files = {"file": (filename, file_bytes, content_type)}
         try:
             resp = self.session.post(
                 self._url(self.UPLOAD_PATH),
@@ -158,6 +161,14 @@ class BrotherQLClient:
                 f"BrotherQL upload response did not contain a 'file_id': {payload!r}"
             )
         return str(file_id)
+
+    def upload_png(self, image_bytes: bytes, *, filename: str = "label.png") -> str:
+        """Upload raw PNG ``bytes`` and return the server-assigned ``file_id``.
+
+        Convenience wrapper around :meth:`upload_file` with
+        ``content_type="image/png"``.
+        """
+        return self.upload_file(image_bytes, filename=filename, content_type="image/png")
 
     def print(
         self,
