@@ -236,7 +236,7 @@ export function renderPluginSettings(container, context) {
 
     try {
       // Save ENDPOINTS
-      const base = `/api/plugin/${slug}/settings/`;
+      const base = `/api/plugins/${slug}/settings/`;
       await fetch(`${base}ENDPOINTS/`, {
         method: "PATCH",
         headers: {
