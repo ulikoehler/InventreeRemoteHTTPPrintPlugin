@@ -7,4 +7,4 @@ or any compatible remote HTTP print service.
 """
 
 # Package version – also used as the InvenTree plugin version (see plugin.py).
-PLUGIN_VERSION = "1.0.0"
+PLUGIN_VERSION = "1.0.1"
